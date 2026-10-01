@@ -17,14 +17,7 @@ use Illuminate\Support\Facades\Route;
 const ROUTE_MAP = 'resources/js/lib/routes.ts';
 
 /** Paths declared in routes.ts whose module has not been built yet. */
-const PLANNED = [
-    '/admin/blog/posts',
-    '/admin/blog/categories',
-    '/admin/blog/tags',
-    '/admin/orders',
-    '/admin/orders/{}',
-    '/admin/orders/{}/status',
-];
+const PLANNED = [];
 
 /**
  * Every URL literal in routes.ts, with interpolations normalised to `{}`.

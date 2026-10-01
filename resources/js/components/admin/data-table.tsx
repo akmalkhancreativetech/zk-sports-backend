@@ -1,14 +1,33 @@
+import {
+    DndContext,
+    type DragEndEvent,
+    KeyboardSensor,
+    PointerSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core';
+import {
+    SortableContext,
+    arrayMove,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { router } from '@inertiajs/react';
 import { type ColumnDef, type RowData, useTable } from '@tanstack/react-table';
 import {
     ArrowDownIcon,
     ArrowUpDownIcon,
     ArrowUpIcon,
+    GripVerticalIcon,
     SearchIcon,
     XIcon,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { Combobox } from '@/components/admin/combobox';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -36,6 +55,10 @@ export interface SelectFilter {
     key: string;
     label: string;
     options: EnumOption[];
+    /** Renders a searchable combobox instead of a plain select. For long lists. */
+    searchable?: boolean;
+    /** Wording for the unset option. Defaults to `All {label}`. */
+    allLabel?: string;
 }
 
 interface DataTableProps<T extends RowData> {
@@ -57,6 +80,18 @@ interface DataTableProps<T extends RowData> {
     rowId?: (row: T) => number;
     /** Rendered when at least one row is selected. */
     bulkActions?: (ids: number[], clear: () => void) => ReactNode;
+    /**
+     * Enables drag-reorder of the current page. Called with the page's rows in
+     * their new order; the caller persists them. Requires `rowId`.
+     */
+    onReorder?: (rows: T[]) => void;
+    /**
+     * Off while a search, filter or sort would make a drop meaningless — the
+     * handles disappear rather than silently writing a nonsense order.
+     */
+    canReorder?: boolean;
+    /** Names a row in the drag handle's accessible label. */
+    rowLabel?: (row: T) => string;
     /**
      * Rows-per-page choices. Must include the controller's default page size,
      * or the dropdown displays a value it does not offer.
@@ -82,6 +117,9 @@ export function DataTable<T extends RowData>({
     minSearchLength = 4,
     rowId,
     bulkActions,
+    onReorder,
+    canReorder = false,
+    rowLabel,
     pageSizeOptions = [10, 15, 25, 50, 100],
 }: DataTableProps<T>) {
     const [search, setSearch] = useState(filters.search ?? '');
@@ -166,10 +204,38 @@ export function DataTable<T extends RowData>({
         visit({ ...cleared, search: undefined, page: 1 });
     };
 
-    const table = useTable({ features: tableConfig, data: page.data, columns });
+    // Local copy so a drop shows immediately; the server's order wins again as
+    // soon as it answers.
+    const [data, setData] = useState(page.data);
+
+    useEffect(() => setData(page.data), [page.data]);
+
+    const dragging = Boolean(onReorder && rowId && canReorder);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (!over || active.id === over.id || !rowId || !onReorder) {
+            return;
+        }
+
+        const from = data.findIndex((row) => rowId(row) === active.id);
+        const to = data.findIndex((row) => rowId(row) === over.id);
+        const next = arrayMove(data, from, to);
+
+        setData(next);
+        onReorder(next);
+    };
+
+    const table = useTable({ features: tableConfig, data, columns });
 
     const rows = table.getRowModel().rows;
-    const pageIds = rowId ? page.data.map(rowId) : [];
+    const pageIds = rowId ? data.map(rowId) : [];
     const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id));
     const someOnPageSelected = pageIds.some((id) => selected.includes(id));
 
@@ -184,7 +250,7 @@ export function DataTable<T extends RowData>({
     const searchTooShort =
         search.trim().length > 0 && search.trim().length < minSearchLength;
 
-    const columnCount = columns.length + (rowId ? 1 : 0);
+    const columnCount = columns.length + (rowId ? 1 : 0) + (onReorder ? 1 : 0);
 
     return (
         <div className="flex flex-col gap-4">
@@ -207,7 +273,25 @@ export function DataTable<T extends RowData>({
                     )}
                 </div>
 
-                {selectFilters.map((filter) => (
+                {selectFilters.map((filter) => {
+                    const allLabel = filter.allLabel ?? `All ${filter.label.toLowerCase()}`;
+
+                    return filter.searchable ? (
+                        <div key={filter.key} className="w-40">
+                            <Combobox
+                                id={`filter-${filter.key}`}
+                                value={filters[filter.key] ?? ALL}
+                                options={[{ value: ALL, label: allLabel }, ...filter.options]}
+                                onChange={(value) =>
+                                    visit({
+                                        [filter.key]: value === ALL ? undefined : value,
+                                        page: 1,
+                                    })
+                                }
+                                searchPlaceholder={`Search ${filter.label.toLowerCase()}…`}
+                            />
+                        </div>
+                    ) : (
                     <Select
                         key={filter.key}
                         value={filters[filter.key] ?? ALL}
@@ -224,12 +308,12 @@ export function DataTable<T extends RowData>({
                             <SelectValue>
                                 {(value) =>
                                     filter.options.find((option) => option.value === value)
-                                        ?.label ?? `All ${filter.label.toLowerCase()}`
+                                        ?.label ?? allLabel
                                 }
                             </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value={ALL}>All {filter.label.toLowerCase()}</SelectItem>
+                            <SelectItem value={ALL}>{allLabel}</SelectItem>
                             {filter.options.map((option) => (
                                 <SelectItem key={option.value} value={option.value}>
                                     {option.label}
@@ -237,7 +321,8 @@ export function DataTable<T extends RowData>({
                             ))}
                         </SelectContent>
                     </Select>
-                ))}
+                    );
+                })}
 
                 {activeFilters > 0 && (
                     <Button variant="ghost" onClick={clearAll}>
@@ -289,10 +374,20 @@ export function DataTable<T extends RowData>({
             )}
 
             <div className="overflow-x-auto rounded-lg border">
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                >
                 <Table>
                     <TableHeader>
                         {table.getHeaderGroups().map((group) => (
                             <TableRow key={group.id}>
+                                {onReorder && (
+                                    <TableHead className="w-10">
+                                        <span className="sr-only">Reorder</span>
+                                    </TableHead>
+                                )}
                                 {rowId && (
                                     <TableHead className="w-10">
                                         <Checkbox
@@ -344,6 +439,10 @@ export function DataTable<T extends RowData>({
                         ))}
                     </TableHeader>
                     <TableBody>
+                        <SortableContext
+                            items={pageIds}
+                            strategy={verticalListSortingStrategy}
+                        >
                         {reloading ? (
                             Array.from({ length: Math.max(page.data.length, 3) }).map((_, row) => (
                                 <TableRow key={`skeleton-${row}`}>
@@ -377,13 +476,13 @@ export function DataTable<T extends RowData>({
                                 const id = rowId ? pageIds[index] : undefined;
 
                                 return (
-                                    <TableRow
+                                    <DataTableRow
                                         key={row.id}
-                                        data-state={
-                                            id !== undefined && selected.includes(id)
-                                                ? 'selected'
-                                                : undefined
-                                        }
+                                        id={id}
+                                        draggable={dragging}
+                                        showHandleCell={Boolean(onReorder)}
+                                        label={rowLabel ? rowLabel(data[index]) : `row ${id}`}
+                                        selected={id !== undefined && selected.includes(id)}
                                     >
                                         {id !== undefined && (
                                             <TableCell className="w-10">
@@ -410,12 +509,14 @@ export function DataTable<T extends RowData>({
                                                 <table.FlexRender cell={cell} />
                                             </TableCell>
                                         ))}
-                                    </TableRow>
+                                    </DataTableRow>
                                 );
                             })
                         )}
+                        </SortableContext>
                     </TableBody>
                 </Table>
+                </DndContext>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -448,5 +549,56 @@ export function DataTable<T extends RowData>({
                 </div>
             </div>
         </div>
+    );
+}
+
+/**
+ * One body row. It always calls `useSortable` — hooks cannot be conditional —
+ * but only wires the handle and transform when dragging is on.
+ */
+function DataTableRow({
+    id,
+    draggable,
+    showHandleCell,
+    label,
+    selected,
+    children,
+}: {
+    id: number | undefined;
+    draggable: boolean;
+    showHandleCell: boolean;
+    label: string;
+    selected: boolean;
+    children: ReactNode;
+}) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: id ?? -1,
+        disabled: !draggable,
+    });
+
+    return (
+        <TableRow
+            ref={draggable ? setNodeRef : undefined}
+            style={draggable ? { transform: CSS.Transform.toString(transform), transition } : undefined}
+            data-state={selected ? 'selected' : undefined}
+            className={isDragging ? 'relative z-10 bg-card shadow-lg' : undefined}
+        >
+            {showHandleCell && (
+                <TableCell className="w-10">
+                    {draggable && (
+                        <button
+                            type="button"
+                            className="cursor-grab touch-none rounded p-1 text-muted-foreground hover:bg-muted active:cursor-grabbing"
+                            aria-label={`Reorder ${label}`}
+                            {...attributes}
+                            {...listeners}
+                        >
+                            <GripVerticalIcon className="size-4" />
+                        </button>
+                    )}
+                </TableCell>
+            )}
+            {children}
+        </TableRow>
     );
 }

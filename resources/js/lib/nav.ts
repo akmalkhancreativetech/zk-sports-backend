@@ -60,9 +60,19 @@ export const navigation: NavGroup[] = [
                 href: routes.blog.posts.index,
                 icon: FileTextIcon,
                 children: [
-                    { title: 'Posts', href: routes.blog.posts.index, icon: FileTextIcon },
-                    { title: 'Categories', href: routes.blog.categories.index, icon: FolderTreeIcon },
-                    { title: 'Tags', href: routes.blog.tags.index, icon: TagIcon },
+                    {
+                        title: 'Posts',
+                        href: routes.blog.posts.index,
+                        icon: FileTextIcon,
+                        ready: true,
+                    },
+                    {
+                        title: 'Categories',
+                        href: routes.blog.categories.index,
+                        icon: FolderTreeIcon,
+                        ready: true,
+                    },
+                    { title: 'Tags', href: routes.blog.tags.index, icon: TagIcon, ready: true },
                 ],
             },
         ],
@@ -75,6 +85,7 @@ export const navigation: NavGroup[] = [
                 href: routes.orders.index,
                 icon: PackageIcon,
                 badge: 'newOrdersCount',
+                ready: true,
             },
             {
                 title: 'Settings',
@@ -104,7 +115,10 @@ export function breadcrumbsFor(currentUrl: string): NavItem[] {
             const child = item.children?.find((c) => isActive(c.href, currentUrl));
 
             if (child) {
-                return [item, child];
+                // A group whose own href is one of its children (Blog → Posts)
+                // would otherwise crumb as "Blog › Posts" pointing at the same
+                // URL twice — same link, and a duplicate React key.
+                return item.href === child.href ? [child] : [item, child];
             }
 
             if (isActive(item.href, currentUrl)) {

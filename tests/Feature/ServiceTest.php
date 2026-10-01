@@ -140,6 +140,86 @@ test('deleting a service only soft deletes it', function () {
     expect(Service::withTrashed()->count())->toBe(1);
 });
 
+test('the index hides trashed services unless asked for them', function () {
+    Service::factory()->create(['title' => 'Live']);
+    Service::factory()->create(['title' => 'Gone'])->delete();
+
+    $this->actingAs($this->editor)
+        ->get('/admin/services')
+        ->assertInertia(fn (AssertableInertia $page) => $page->has('services.data', 1)
+            ->where('services.data.0.title', 'Live')
+        );
+
+    $this->actingAs($this->editor)
+        ->get('/admin/services?trashed=only')
+        ->assertInertia(fn (AssertableInertia $page) => $page->has('services.data', 1)
+            ->where('services.data.0.title', 'Gone')
+            ->whereNot('services.data.0.deleted_at', null)
+        );
+
+    $this->actingAs($this->editor)
+        ->get('/admin/services?trashed=with')
+        ->assertInertia(fn (AssertableInertia $page) => $page->has('services.data', 2));
+});
+
+test('an admin can restore a trashed service', function () {
+    $service = Service::factory()->create();
+    $service->delete();
+
+    $this->actingAs($this->editor)
+        ->put("/admin/services/{$service->id}/restore")
+        ->assertForbidden();
+
+    $this->actingAs($this->admin)
+        ->put("/admin/services/{$service->id}/restore")
+        ->assertSessionHas('success');
+
+    expect(Service::count())->toBe(1);
+});
+
+test('force deleting a service removes its rows and its image files', function () {
+    $this->actingAs($this->editor)->post('/admin/services', servicePayload([
+        'featured_image' => UploadedFile::fake()->image('kit.jpg', 800, 600),
+    ]));
+
+    $service = Service::sole();
+    $featured = $service->featured_image;
+    $service->images()->create(['path' => 'services/gallery/a.webp', 'sort_order' => 0]);
+    Storage::disk('public')->put('services/gallery/a.webp', 'x');
+    $service->delete();
+
+    $this->actingAs($this->editor)
+        ->delete("/admin/services/{$service->id}/force")
+        ->assertForbidden();
+
+    $this->actingAs($this->admin)
+        ->delete("/admin/services/{$service->id}/force")
+        ->assertSessionHas('success');
+
+    expect(Service::withTrashed()->count())->toBe(0);
+    Storage::disk('public')->assertMissing($featured);
+    Storage::disk('public')->assertMissing('services/gallery/a.webp');
+});
+
+test('bulk restore and bulk force delete act on trashed services', function () {
+    $services = Service::factory()->count(2)->create();
+    $services->each->delete();
+    $ids = $services->pluck('id')->all();
+
+    $this->actingAs($this->admin)
+        ->post('/admin/services/bulk', ['action' => 'restore', 'ids' => $ids])
+        ->assertSessionHas('success');
+
+    expect(Service::count())->toBe(2);
+
+    Service::query()->get()->each->delete();
+
+    $this->actingAs($this->admin)
+        ->post('/admin/services/bulk', ['action' => 'force-delete', 'ids' => $ids]);
+
+    expect(Service::withTrashed()->count())->toBe(0);
+});
+
 test('a featured image is converted to webp', function () {
     $this->actingAs($this->editor)->post('/admin/services', servicePayload([
         'featured_image' => UploadedFile::fake()->image('kit.jpg', 1200, 800),

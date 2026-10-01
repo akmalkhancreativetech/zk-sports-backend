@@ -41,4 +41,9 @@ class ServicePolicy
     {
         return $user->isAdmin();
     }
+
+    public function forceDelete(User $user, Service $service): bool
+    {
+        return $user->isAdmin();
+    }
 }

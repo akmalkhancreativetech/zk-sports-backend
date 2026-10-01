@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\OrderStatus;
 use App\Enums\UserRole;
+use App\Models\Order;
 use App\Models\User;
 use Inertia\Testing\AssertableInertia;
 
@@ -70,8 +72,16 @@ test('flash messages are shared for the toast bridge', function () {
         );
 });
 
-test('the nav order badge count is not shared until the orders module exists', function () {
+test('the nav order badge counts orders awaiting triage', function () {
+    Order::factory()->count(2)->create();
+    Order::factory()->status(OrderStatus::Completed)->create();
+
     $this->actingAs(User::factory()->admin()->create())
         ->get('/admin')
-        ->assertInertia(fn (AssertableInertia $page) => $page->missing('newOrdersCount'));
+        ->assertInertia(fn (AssertableInertia $page) => $page->where('newOrdersCount', 2));
+});
+
+test('the nav order badge count is not shared with guests', function () {
+    $this->get('/login')
+        ->assertInertia(fn (AssertableInertia $page) => $page->where('newOrdersCount', null));
 });

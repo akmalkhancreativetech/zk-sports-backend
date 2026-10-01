@@ -1,9 +1,13 @@
 import { useForm } from '@inertiajs/react';
-import { DynamicIcon, iconNames } from 'lucide-react/dynamic';
 import { type ReactNode, useState } from 'react';
 
 import { Combobox, type ComboboxOption } from '@/components/admin/combobox';
 import { ImageUploader } from '@/components/admin/image-uploader';
+import {
+    ServiceIcon,
+    serviceIconLabel,
+    serviceIconNames,
+} from '@/components/admin/service-icons';
 import { SerpPreview } from '@/components/admin/serp-preview';
 import { SwitchField } from '@/components/admin/switch-field';
 import { AuthField } from '@/components/auth/auth-field';
@@ -38,10 +42,7 @@ interface Props {
 const NO_CATEGORY = '__none__';
 const NO_ICON = '__no_icon__';
 
-/**
- * Every lucide name, previewed lazily: `DynamicIcon` code-splits per icon, so
- * only the icons actually rendered are fetched.
- */
+/** A curated, statically imported set — see `service-icons` for why. */
 const iconOptions: ComboboxOption[] = [
     {
         value: NO_ICON,
@@ -49,12 +50,12 @@ const iconOptions: ComboboxOption[] = [
         // An empty tile keeps this row's label aligned with the icon rows.
         icon: <span className="size-6 shrink-0 rounded-md border border-dashed" />,
     },
-    ...iconNames.map((name) => ({
+    ...serviceIconNames.map((name) => ({
         value: name,
-        label: name,
+        label: serviceIconLabel(name),
         icon: (
             <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
-                <DynamicIcon name={name} className="size-3.5" />
+                <ServiceIcon name={name} className="size-3.5" />
             </span>
         ),
     })),
@@ -101,6 +102,16 @@ export function ServiceForm({ service, categories, extraTabs = [] }: Props) {
         { value: NO_CATEGORY, label: 'Uncategorised' },
         ...categories,
     ];
+
+    // A service saved before this list was curated may hold a name that is no
+    // longer offered. Keep it selectable so editing the service does not
+    // quietly drop its icon.
+    const currentIconMissing =
+        Boolean(data.icon) && !serviceIconNames.includes(data.icon);
+
+    const iconChoices = currentIconMissing
+        ? [...iconOptions, { value: data.icon, label: `${data.icon} (current)` }]
+        : iconOptions;
 
     // The slug auto-derives from the title until edited by hand.
     const [slugLocked, setSlugLocked] = useState(Boolean(service));
@@ -245,18 +256,17 @@ export function ServiceForm({ service, categories, extraTabs = [] }: Props) {
                                     <Combobox
                                         id="icon"
                                         value={data.icon}
-                                        options={iconOptions}
+                                        options={iconChoices}
                                         onChange={(value) =>
                                             setData('icon', value === NO_ICON ? '' : value)
                                         }
                                         placeholder="No icon"
-                                        searchPlaceholder="Search lucide icons…"
+                                        searchPlaceholder="Search icons…"
                                         emptyMessage="No icon matches."
-                                        limit={48}
                                         invalid={Boolean(errors.icon)}
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                        A lucide icon name, e.g. shirt.
+                                        Search by what it shows, e.g. delivery.
                                     </p>
                                     {errors.icon && (
                                         <p className="text-sm text-destructive">{errors.icon}</p>

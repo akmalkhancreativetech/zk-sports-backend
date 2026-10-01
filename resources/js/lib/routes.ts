@@ -37,6 +37,8 @@ export const routes = {
     edit: (id: number | string) => `/admin/services/${id}/edit`,
     update: (id: number | string) => `/admin/services/${id}`,
     destroy: (id: number | string) => `/admin/services/${id}`,
+    restore: (id: number | string) => `/admin/services/${id}/restore`,
+    forceDelete: (id: number | string) => `/admin/services/${id}/force`,
     options: (id: number | string) => `/admin/services/${id}/options`,
     priceTiers: (id: number | string) => `/admin/services/${id}/price-tiers`,
     images: {
@@ -49,21 +51,49 @@ export const routes = {
     categories: {
       index: '/admin/service-categories',
       store: '/admin/service-categories',
+      reorder: '/admin/service-categories/reorder',
       update: (id: number | string) => `/admin/service-categories/${id}`,
       destroy: (id: number | string) => `/admin/service-categories/${id}`,
+      restore: (id: number | string) => `/admin/service-categories/${id}/restore`,
+      forceDelete: (id: number | string) => `/admin/service-categories/${id}/force`,
     },
   },
 
   // Remaining CRUD shape lands with each module (plan.md §2.2); the nav needs
   // only the index URLs for now.
   blog: {
-    posts: { index: '/admin/blog/posts' },
-    categories: { index: '/admin/blog/categories' },
-    tags: { index: '/admin/blog/tags' },
+    posts: {
+      index: '/admin/blog/posts',
+      create: '/admin/blog/posts/create',
+      store: '/admin/blog/posts',
+      bulk: '/admin/blog/posts/bulk',
+      edit: (id: number | string) => `/admin/blog/posts/${id}/edit`,
+      update: (id: number | string) => `/admin/blog/posts/${id}`,
+      destroy: (id: number | string) => `/admin/blog/posts/${id}`,
+      restore: (id: number | string) => `/admin/blog/posts/${id}/restore`,
+      forceDelete: (id: number | string) => `/admin/blog/posts/${id}/force`,
+    },
+    categories: {
+      index: '/admin/blog/categories',
+      store: '/admin/blog/categories',
+      reorder: '/admin/blog/categories/reorder',
+      update: (id: number | string) => `/admin/blog/categories/${id}`,
+      destroy: (id: number | string) => `/admin/blog/categories/${id}`,
+      restore: (id: number | string) => `/admin/blog/categories/${id}/restore`,
+      forceDelete: (id: number | string) => `/admin/blog/categories/${id}/force`,
+    },
+    tags: {
+      index: '/admin/blog/tags',
+      store: '/admin/blog/tags',
+      update: (id: number | string) => `/admin/blog/tags/${id}`,
+      destroy: (id: number | string) => `/admin/blog/tags/${id}`,
+    },
   },
   orders: {
     index: '/admin/orders',
     show: (id: number | string) => `/admin/orders/${id}`,
+    // Same URL as `show`, different verb — items, notes and assignment.
+    update: (id: number | string) => `/admin/orders/${id}`,
     updateStatus: (id: number | string) => `/admin/orders/${id}/status`,
     destroy: (id: number | string) => `/admin/orders/${id}`,
   },

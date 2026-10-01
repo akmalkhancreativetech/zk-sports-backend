@@ -26,4 +26,14 @@ class ServiceCategoryPolicy
     {
         return $user->isAdmin();
     }
+
+    public function restore(User $user, ServiceCategory $category): bool
+    {
+        return $user->isAdmin();
+    }
+
+    public function forceDelete(User $user, ServiceCategory $category): bool
+    {
+        return $user->isAdmin();
+    }
 }

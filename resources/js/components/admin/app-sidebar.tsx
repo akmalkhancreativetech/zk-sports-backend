@@ -58,9 +58,16 @@ function PendingItem({ item }: { item: NavItem }) {
 
 function CollapsibleItem({ item, url }: { item: NavItem; url: string }) {
     const active = isActive(item.href, url);
+    // The group's own href is one of its children (Blog → Posts), so matching it
+    // alone leaves the group shut on every sibling page. Any active child opens it.
+    const hasActiveChild = item.children?.some((child) => isActive(child.href, url)) ?? false;
 
     return (
-        <Collapsible defaultOpen={active} render={<SidebarMenuItem />} className="group/collapsible">
+        <Collapsible
+            defaultOpen={active || hasActiveChild}
+            render={<SidebarMenuItem />}
+            className="group/collapsible"
+        >
             <CollapsibleTrigger
                 render={
                     <SidebarMenuButton tooltip={item.title} isActive={active}>

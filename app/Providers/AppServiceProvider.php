@@ -4,7 +4,10 @@ namespace App\Providers;
 
 use App\Enums\UserRole;
 use App\Models\User;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -29,5 +32,14 @@ class AppServiceProvider extends ServiceProvider
         ));
 
         Gate::define('manage-users', fn (User $user) => $user->isAdmin());
+
+        /*
+         * Laravel 11 dropped the RouteServiceProvider that used to register
+         * this, so `throttle:api` in routes/api.php would throw "Rate limiter
+         * [api] is not defined" without it. Keyed by user first so one busy
+         * office NAT does not throttle every signed-in customer behind it.
+         */
+        RateLimiter::for('api', fn (Request $request) => Limit::perMinute(60)
+            ->by($request->user()?->id ?: $request->ip()));
     }
 }

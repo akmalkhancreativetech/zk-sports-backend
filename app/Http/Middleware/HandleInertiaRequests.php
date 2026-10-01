@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Order;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -51,6 +52,12 @@ class HandleInertiaRequests extends Middleware
             // Read server-side so the sidebar renders in its persisted state
             // on first paint instead of snapping open after hydration.
             'sidebarOpen' => $request->cookie('sidebar_state') !== 'false',
+            // The sidebar's Orders badge. Closured so the query runs only when
+            // Inertia actually resolves the prop, and skipped entirely for
+            // guests, who never see the sidebar.
+            'newOrdersCount' => fn () => $request->user()?->can('access-admin')
+                ? Order::query()->awaitingTriage()->count()
+                : null,
         ];
     }
 }

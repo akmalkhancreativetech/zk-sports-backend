@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for the public site.
+ *
+ * The palette is taken from the logo itself, sampled rather than eyeballed:
+ * the mark is #f10b18 red on #282829 charcoal with white counters. Everything
+ * here is neutral-warm to match that charcoal — an earlier navy scheme fought
+ * the logo wherever the two met.
+ *
+ * Every colour is consumed as a Tailwind utility (`bg-brand`, `text-accent`)
+ * via the `@theme inline` block below. Components do not hardcode hex values,
+ * so a rebrand is an edit to this file.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #17171a;
+
+  /* Panels that need to separate from the page without a border. */
+  --surface: #f5f5f6;
+  --border: #e4e4e7;
+  --muted: #64646d;
+
+  /* The logo's charcoal, used for the hero panel, the CTA band and footers. */
+  --brand: #282829;
+  --brand-foreground: #ffffff;
+
+  /*
+   * The seamless backdrop behind a slider photo. Sampled from the uploads
+   * themselves — every edge of both hero images is #fafafa–#fdfdfd — so an
+   * image shown whole inside a wider frame appears to sit on its own studio
+   * sweep rather than in a letterbox. Intentionally identical in dark mode:
+   * the photograph is bright either way, and a dark surround would be a hard
+   * seam against the white in the picture.
+   */
+  --photo-backdrop: #fafafa;
+
+  /*
+   * The logo red is #f10b18, which lands at 4.4:1 on white — under the 4.5:1
+   * AA floor for body-sized text, and the same against white on a filled
+   * button. `--accent` is therefore a fractionally deeper red that clears AA in
+   * both directions, and `--accent-bright` keeps the exact brand value for
+   * decoration that carries no text: hairlines, dots, hover borders.
+   */
+  --accent: #d90b16;
+  --accent-bright: #f10b18;
+  --accent-foreground: #ffffff;
+
+  /*
+   * Filled surfaces that carry white text — buttons, badges. Kept separate
+   * from `--accent` because the two move in opposite directions in dark mode:
+   * text has to lighten against a dark page, while a button fill must stay
+   * dark enough for its white label.
+   */
+  --accent-solid: #d90b16;
+}
+
+/*
+ * Dark mode resolves in three steps, and the two blocks below are deliberately
+ * identical in content:
+ *
+ *  1. No `data-theme` on <html> — follow the operating system.
+ *  2. `data-theme="light"` — stay light even where the OS is dark, which is why
+ *     the media query is guarded with `:not([data-theme="light"])`.
+ *  3. `data-theme="dark"` — dark regardless of the OS.
+ *
+ * The attribute is written by the toggle and replayed from localStorage by the
+ * inline script in layout.tsx before first paint.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #0e0e0f;
+    --foreground: #ededee;
+
+    --surface: #17171a;
+    --border: #2a2a2d;
+    --muted: #9a9aa3;
+
+    /* The charcoal that reads as "brand" on white vanishes on a dark page, so
+     * the brand surface lifts rather than darkens. */
+    --brand: #1e1e20;
+    --brand-foreground: #ffffff;
+
+    /* The deepened red fails against a near-black background, so dark mode
+     * moves the other way and brightens past the logo value instead. */
+    --accent: #fa3a44;
+    --accent-bright: #f10b18;
+    --accent-foreground: #ffffff;
+
+    /* Unchanged from light mode: a brightened fill would drop white label text
+     * to 3.65:1. This still clears 3:1 against the page as a surface. */
+    --accent-solid: #d90b16;
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: #0e0e0f;
+  --foreground: #ededee;
+
+  --surface: #17171a;
+  --border: #2a2a2d;
+  --muted: #9a9aa3;
+
+  --brand: #1e1e20;
+  --brand-foreground: #ffffff;
+
+  --accent: #fa3a44;
+  --accent-bright: #f10b18;
+  --accent-foreground: #ffffff;
+  --accent-solid: #d90b16;
+}
+
+/*
+ * Which glyph the toggle shows is decided in CSS, not React state: the button
+ * carries both icons and the active theme reveals one. A component that read
+ * the theme during render would have to guess on the server and correct itself
+ * on the client, which is a hydration mismatch by construction.
+ */
+.theme-icon-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-icon-dark {
+    display: block;
+  }
+
+  :root:not([data-theme="light"]) .theme-icon-light {
+    display: none;
+  }
+}
+
+:root[data-theme="dark"] .theme-icon-dark {
+  display: block;
+}
+
+:root[data-theme="dark"] .theme-icon-light {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-icon-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-icon-light {
+  display: block;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-photo-backdrop: var(--photo-backdrop);
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  /* Headings and numerals only — see the note on the font in layout.tsx. */
+  --font-display: var(--font-barlow-condensed);
+}
+
+/*
+ * The hero's snap scroller. The dots are the navigation affordance, so the
+ * scrollbar is suppressed — left visible it drew a grey rail across the full
+ * width of the hero.
+ */
+.hero-scroller {
+  scrollbar-width: none;
+}
+
+.hero-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* Geist is loaded in layout.tsx; the previous Arial rule discarded it. */
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Keyboard focus must stay visible everywhere, including over photography. */
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+
+/*
+ * The one motion moment on the site is a slow image scale on hover. Honour a
+ * reduced-motion preference by removing it, along with the hero's smooth
+ * scroll, rather than leaving it to each component to remember.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

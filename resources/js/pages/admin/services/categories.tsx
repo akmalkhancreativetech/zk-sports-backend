@@ -1,7 +1,32 @@
+import {
+    DndContext,
+    type DragEndEvent,
+    KeyboardSensor,
+    PointerSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core';
+import {
+    SortableContext,
+    arrayMove,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { router, useForm } from '@inertiajs/react';
-import { ArrowLeftIcon, PlusIcon, TrashIcon } from 'lucide-react';
-import { useState } from 'react';
+import {
+    ArrowLeftIcon,
+    EyeIcon,
+    EyeOffIcon,
+    MoreHorizontalIcon,
+    PencilIcon,
+    PlusIcon,
+    RotateCcwIcon,
+    TrashIcon,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
+import { SortableTableRow } from '@/components/admin/sortable-table-row';
 import { ActiveBadge } from '@/components/admin/status-badge';
 import { SwitchField } from '@/components/admin/switch-field';
 import { AuthField } from '@/components/auth/auth-field';
@@ -20,6 +45,21 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Label } from '@/components/ui/label';
+import {
     Table,
     TableBody,
     TableCell,
@@ -27,17 +67,69 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { formErrorToast } from '@/lib/form-feedback';
 import { routes } from '@/lib/routes';
-import type { ServiceCategoryItem } from '@/types/models';
+import type { ServiceCategoryItem, TrashedServiceCategory } from '@/types/models';
 
 interface Props {
     categories: ServiceCategoryItem[];
+    trashed: TrashedServiceCategory[];
     canDelete: boolean;
+    canRestore: boolean;
 }
 
-export default function ServiceCategories({ categories, canDelete }: Props) {
+export default function ServiceCategories({
+    categories,
+    trashed,
+    canDelete,
+    canRestore,
+}: Props) {
     const [pendingDelete, setPendingDelete] = useState<ServiceCategoryItem | null>(null);
+    const [pendingPurge, setPendingPurge] = useState<TrashedServiceCategory | null>(null);
+    const [editing, setEditing] = useState<ServiceCategoryItem | null>(null);
+    /** The row whose active toggle is in flight, so it can show that it is. */
+    const [togglingId, setTogglingId] = useState<number | null>(null);
+
+    // Optimistic drag order, re-synced whenever the server sends a new list.
+    const [ordered, setOrdered] = useState(categories);
+
+    useEffect(() => setOrdered(categories), [categories]);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (!over || active.id === over.id) {
+            return;
+        }
+
+        const from = ordered.findIndex((category) => category.id === active.id);
+        const to = ordered.findIndex((category) => category.id === over.id);
+        const next = arrayMove(ordered, from, to);
+
+        setOrdered(next);
+
+        router.post(
+            routes.services.categories.reorder,
+            {
+                categories: next.map((category, index) => ({
+                    id: category.id,
+                    sort_order: index,
+                })),
+            },
+            {
+                preserveScroll: true,
+                preserveState: true,
+                // Roll back to the server's truth if the write failed.
+                onError: () => setOrdered(categories),
+            },
+        );
+    };
 
     const form = useForm({ name: '', slug: '', description: '', is_active: true });
 
@@ -49,6 +141,23 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
             ...formErrorToast(() => form.reset()),
         });
     };
+
+    const toggleActive = (category: ServiceCategoryItem) => {
+        setTogglingId(category.id);
+
+        router.put(
+            routes.services.categories.update(category.id),
+            {
+                name: category.name,
+                slug: category.slug,
+                description: category.description,
+                is_active: !category.is_active,
+            },
+            { preserveScroll: true, onFinish: () => setTogglingId(null) },
+        );
+    };
+
+    const activeCount = categories.filter((category) => category.is_active).length;
 
     return (
         <AdminLayout
@@ -87,6 +196,27 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                             />
                         </div>
 
+                        <div className="flex flex-col gap-2">
+                            <Label htmlFor="description">Description</Label>
+                            <Textarea
+                                id="description"
+                                rows={2}
+                                maxLength={2000}
+                                value={form.data.description}
+                                onChange={(event) =>
+                                    form.setData('description', event.target.value)
+                                }
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Optional. Used as the category blurb on the public site.
+                            </p>
+                            {form.errors.description && (
+                                <p role="alert" className="text-sm text-destructive">
+                                    {form.errors.description}
+                                </p>
+                            )}
+                        </div>
+
                         <SwitchField
                             id="is_active"
                             label="Active"
@@ -111,7 +241,9 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                 <CardHeader>
                     <CardTitle>Categories</CardTitle>
                     <CardDescription>
-                        Deleting one leaves its services uncategorised rather than removing them.
+                        {categories.length === 0
+                            ? 'Deleting one moves it to the trash below; its services keep their category until you delete it for good.'
+                            : `${categories.length} total · ${activeCount} active. Drag a row to change the order the public site uses.`}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -123,21 +255,48 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                         </div>
                     ) : (
                         <div className="overflow-x-auto rounded-lg border">
+                          <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
+                          >
                             <Table>
                                 <TableHeader>
                                     <TableRow>
+                                        <TableHead className="w-10">
+                                            <span className="sr-only">Reorder</span>
+                                        </TableHead>
                                         <TableHead>Name</TableHead>
                                         <TableHead>Slug</TableHead>
                                         <TableHead className="text-right">Services</TableHead>
                                         <TableHead>Status</TableHead>
-                                        <TableHead />
+                                        <TableHead className="text-right">
+                                            <span className="sr-only">Actions</span>
+                                        </TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {categories.map((category) => (
-                                        <TableRow key={category.id}>
-                                            <TableCell className="font-medium">
-                                                {category.name}
+                                  <SortableContext
+                                    items={ordered.map((category) => category.id)}
+                                    strategy={verticalListSortingStrategy}
+                                  >
+                                    {ordered.map((category) => (
+                                        <SortableTableRow
+                                            key={category.id}
+                                            id={category.id}
+                                            label={category.name}
+                                        >
+                                            <TableCell>
+                                                <div className="flex min-w-0 flex-col">
+                                                    <span className="truncate font-medium">
+                                                        {category.name}
+                                                    </span>
+                                                    {category.description && (
+                                                        <span className="truncate text-xs text-muted-foreground">
+                                                            {category.description}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </TableCell>
                                             <TableCell>
                                                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
@@ -151,37 +310,142 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                                                 <ActiveBadge active={category.is_active} />
                                             </TableCell>
                                             <TableCell className="text-right">
+                                                <div className="flex justify-end">
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger
+                                                            render={
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    disabled={
+                                                                        togglingId === category.id
+                                                                    }
+                                                                >
+                                                                    <MoreHorizontalIcon className="size-4" />
+                                                                    <span className="sr-only">
+                                                                        Actions for {category.name}
+                                                                    </span>
+                                                                </Button>
+                                                            }
+                                                        />
+                                                        <DropdownMenuContent
+                                                            className="w-auto min-w-40"
+                                                            align="end"
+                                                        >
+                                                            <DropdownMenuItem
+                                                                onClick={() => setEditing(category)}
+                                                            >
+                                                                <PencilIcon />
+                                                                Edit
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                onClick={() =>
+                                                                    toggleActive(category)
+                                                                }
+                                                            >
+                                                                {category.is_active ? (
+                                                                    <>
+                                                                        <EyeOffIcon />
+                                                                        Deactivate
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <EyeIcon />
+                                                                        Activate
+                                                                    </>
+                                                                )}
+                                                            </DropdownMenuItem>
+                                                            {canDelete && (
+                                                                <DropdownMenuItem
+                                                                    variant="destructive"
+                                                                    onClick={() =>
+                                                                        setPendingDelete(category)
+                                                                    }
+                                                                >
+                                                                    <TrashIcon />
+                                                                    Delete
+                                                                </DropdownMenuItem>
+                                                            )}
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
+                                            </TableCell>
+                                        </SortableTableRow>
+                                    ))}
+                                  </SortableContext>
+                                </TableBody>
+                            </Table>
+                          </DndContext>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {trashed.length > 0 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Trash</CardTitle>
+                        <CardDescription>
+                            Deleted categories keep their services attached. Restoring one puts
+                            them back; deleting it for good leaves them uncategorised.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="overflow-x-auto rounded-lg border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Name</TableHead>
+                                        <TableHead>Deleted</TableHead>
+                                        <TableHead className="text-right">Services</TableHead>
+                                        <TableHead className="text-right">
+                                            <span className="sr-only">Actions</span>
+                                        </TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {trashed.map((category) => (
+                                        <TableRow key={category.id}>
+                                            <TableCell className="font-medium">
+                                                {category.name}
+                                            </TableCell>
+                                            <TableCell className="text-muted-foreground">
+                                                {category.deleted_at
+                                                    ? new Date(
+                                                          category.deleted_at,
+                                                      ).toLocaleDateString()
+                                                    : '—'}
+                                            </TableCell>
+                                            <TableCell className="text-right tabular-nums">
+                                                {category.services_count}
+                                            </TableCell>
+                                            <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() =>
-                                                            router.put(
-                                                                routes.services.categories.update(
-                                                                    category.id,
-                                                                ),
-                                                                {
-                                                                    name: category.name,
-                                                                    slug: category.slug,
-                                                                    description:
-                                                                        category.description,
-                                                                    is_active: !category.is_active,
-                                                                },
-                                                                { preserveScroll: true },
-                                                            )
-                                                        }
-                                                    >
-                                                        {category.is_active
-                                                            ? 'Deactivate'
-                                                            : 'Activate'}
-                                                    </Button>
+                                                    {canRestore && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                router.put(
+                                                                    routes.services.categories.restore(
+                                                                        category.id,
+                                                                    ),
+                                                                    {},
+                                                                    { preserveScroll: true },
+                                                                )
+                                                            }
+                                                        >
+                                                            <RotateCcwIcon className="size-4" />
+                                                            Restore
+                                                        </Button>
+                                                    )}
                                                     {canDelete && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
-                                                            aria-label={`Delete ${category.name}`}
+                                                            aria-label={`Permanently delete ${category.name}`}
                                                             onClick={() =>
-                                                                setPendingDelete(category)
+                                                                setPendingPurge(category)
                                                             }
                                                         >
                                                             <TrashIcon className="size-4 text-destructive" />
@@ -194,9 +458,48 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                                 </TableBody>
                             </Table>
                         </div>
-                    )}
-                </CardContent>
-            </Card>
+                    </CardContent>
+                </Card>
+            )}
+
+            <EditCategoryDialog editing={editing} onClose={() => setEditing(null)} />
+
+            <AlertDialog
+                open={pendingPurge !== null}
+                onOpenChange={(open) => !open && setPendingPurge(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Permanently delete “{pendingPurge?.name}”?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This cannot be undone.{' '}
+                            {pendingPurge?.services_count === 0
+                                ? 'It has no services.'
+                                : `Its ${pendingPurge?.services_count} ${
+                                      pendingPurge?.services_count === 1 ? 'service' : 'services'
+                                  } will become uncategorised. The services themselves are kept.`}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                if (pendingPurge) {
+                                    router.delete(
+                                        routes.services.categories.forceDelete(pendingPurge.id),
+                                        { preserveScroll: true },
+                                    );
+                                }
+                                setPendingPurge(null);
+                            }}
+                        >
+                            Delete permanently
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog
                 open={pendingDelete !== null}
@@ -206,8 +509,12 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                     <AlertDialogHeader>
                         <AlertDialogTitle>Delete “{pendingDelete?.name}”?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Its {pendingDelete?.services_count} service(s) will become
-                            uncategorised. The services themselves are kept.
+                            It moves to the trash below, where you can restore it.
+                            {pendingDelete && pendingDelete.services_count > 0
+                                ? ` Its ${pendingDelete.services_count} ${
+                                      pendingDelete.services_count === 1 ? 'service' : 'services'
+                                  } stay attached and become uncategorised only if you delete it for good.`
+                                : ''}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -229,5 +536,114 @@ export default function ServiceCategories({ categories, canDelete }: Props) {
                 </AlertDialogContent>
             </AlertDialog>
         </AdminLayout>
+    );
+}
+
+/**
+ * Editing happens in place: the list is short and a category is four fields, so
+ * a dialog beats a dedicated page.
+ */
+function EditCategoryDialog({
+    editing,
+    onClose,
+}: {
+    editing: ServiceCategoryItem | null;
+    onClose: () => void;
+}) {
+    const form = useForm({ name: '', slug: '', description: '', is_active: true });
+    const { setData, clearErrors } = form;
+
+    // Reload the form whenever a different category is opened.
+    useEffect(() => {
+        if (editing === null) {
+            return;
+        }
+
+        clearErrors();
+
+        setData({
+            name: editing.name,
+            slug: editing.slug,
+            description: editing.description ?? '',
+            is_active: editing.is_active,
+        });
+    }, [editing]);
+
+    const submit = (event: React.FormEvent) => {
+        event.preventDefault();
+
+        if (!editing) {
+            return;
+        }
+
+        form.put(routes.services.categories.update(editing.id), {
+            preserveScroll: true,
+            ...formErrorToast(onClose),
+        });
+    };
+
+    return (
+        <Dialog open={editing !== null} onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                    <DialogTitle>Edit category</DialogTitle>
+                    <DialogDescription>
+                        Changing the slug breaks any public link that already uses the old one.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <form onSubmit={submit} className="flex flex-col gap-5">
+                    <AuthField
+                        id="edit_name"
+                        label="Name"
+                        value={form.data.name}
+                        error={form.errors.name}
+                        required
+                        onChange={(event) => form.setData('name', event.target.value)}
+                    />
+                    <AuthField
+                        id="edit_slug"
+                        label="Slug"
+                        value={form.data.slug}
+                        error={form.errors.slug}
+                        hint="Lowercased on save."
+                        onChange={(event) => form.setData('slug', event.target.value)}
+                    />
+
+                    <div className="flex flex-col gap-2">
+                        <Label htmlFor="edit_description">Description</Label>
+                        <Textarea
+                            id="edit_description"
+                            rows={3}
+                            maxLength={2000}
+                            value={form.data.description}
+                            onChange={(event) => form.setData('description', event.target.value)}
+                        />
+                        {form.errors.description && (
+                            <p role="alert" className="text-sm text-destructive">
+                                {form.errors.description}
+                            </p>
+                        )}
+                    </div>
+
+                    <SwitchField
+                        id="edit_is_active"
+                        label="Active"
+                        checked={form.data.is_active}
+                        onCheckedChange={(checked) => form.setData('is_active', checked)}
+                        tone="success"
+                    />
+
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button type="submit" disabled={form.processing}>
+                            {form.processing ? 'Saving…' : 'Save changes'}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }

@@ -35,6 +35,7 @@ class ServiceController extends Controller
             'status' => ['nullable', Rule::in(['active', 'inactive'])],
             'featured' => ['nullable', Rule::in(['yes', 'no'])],
             'category' => ['nullable', 'integer', Rule::exists('service_categories', 'id')],
+            'trashed' => ['nullable', Rule::in(['with', 'only'])],
             'sort' => ['nullable', 'string', Rule::in(self::SORTABLE)],
             'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
@@ -44,6 +45,12 @@ class ServiceController extends Controller
         $direction = $filters['direction'] ?? 'asc';
 
         $services = Service::query()
+            ->when(
+                $filters['trashed'] ?? null,
+                fn ($query, string $value) => $value === 'only'
+                    ? $query->onlyTrashed()
+                    : $query->withTrashed(),
+            )
             ->with('category:id,name')
             ->withCount('images')
             ->when(
@@ -81,6 +88,7 @@ class ServiceController extends Controller
                 'is_featured' => $service->is_featured,
                 'sort_order' => $service->sort_order,
                 'updated_at' => $service->updated_at?->toIso8601String(),
+                'deleted_at' => $service->deleted_at?->toIso8601String(),
             ]);
 
         return Inertia::render('admin/services/index', [
@@ -90,11 +98,13 @@ class ServiceController extends Controller
                 'status' => $filters['status'] ?? null,
                 'featured' => $filters['featured'] ?? null,
                 'category' => isset($filters['category']) ? (string) $filters['category'] : null,
+                'trashed' => $filters['trashed'] ?? null,
                 'sort' => $sort,
                 'direction' => $direction,
             ],
             'categories' => $this->categoryOptions(),
             'canDelete' => $request->user()->can('delete', new Service),
+            'canRestore' => $request->user()->can('restore', new Service),
         ]);
     }
 
@@ -215,6 +225,41 @@ class ServiceController extends Controller
         return to_route('admin.services.index')->with('success', 'Service deleted.');
     }
 
+    public function restore(Service $service): RedirectResponse
+    {
+        Gate::authorize('restore', $service);
+
+        $service->restore();
+
+        return back()->with('success', 'Service restored.');
+    }
+
+    public function forceDelete(Service $service): RedirectResponse
+    {
+        Gate::authorize('forceDelete', $service);
+
+        $this->purge($service);
+
+        return to_route('admin.services.index', ['trashed' => 'only'])
+            ->with('success', 'Service permanently deleted.');
+    }
+
+    /**
+     * The child rows cascade in the database, but their files do not: every
+     * image path has to be unlinked here or the disk keeps orphans forever.
+     */
+    private function purge(Service $service): void
+    {
+        foreach ($service->images as $image) {
+            $this->images->delete($image->path);
+        }
+
+        $this->images->delete($service->featured_image);
+        $this->images->delete($service->og_image);
+
+        $service->forceDelete();
+    }
+
     /** Accepts the whole ordered set in one request, never one call per drag. */
     public function reorder(Request $request): RedirectResponse
     {
@@ -238,22 +283,41 @@ class ServiceController extends Controller
     public function bulk(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'action' => ['required', Rule::in(['activate', 'deactivate', 'feature', 'unfeature', 'delete'])],
+            'action' => ['required', Rule::in([
+                'activate', 'deactivate', 'feature', 'unfeature', 'delete', 'restore', 'force-delete',
+            ])],
             'ids' => ['required', 'array', 'min:1', 'max:100'],
             'ids.*' => ['integer', Rule::exists('services', 'id')],
         ]);
 
-        $services = Service::query()->whereKey($validated['ids'])->get();
         $action = $validated['action'];
 
+        // Restoring and purging address rows the default scope hides.
+        $services = Service::query()
+            ->when(
+                in_array($action, ['restore', 'force-delete'], true),
+                fn ($query) => $query->withTrashed(),
+            )
+            ->whereKey($validated['ids'])
+            ->get();
+
+        $ability = match ($action) {
+            'delete' => 'delete',
+            'restore' => 'restore',
+            'force-delete' => 'forceDelete',
+            default => 'update',
+        };
+
         foreach ($services as $service) {
-            Gate::authorize($action === 'delete' ? 'delete' : 'update', $service);
+            Gate::authorize($ability, $service);
         }
 
         DB::transaction(function () use ($services, $action) {
             foreach ($services as $service) {
                 match ($action) {
                     'delete' => $service->delete(),
+                    'restore' => $service->restore(),
+                    'force-delete' => $this->purge($service),
                     'activate' => $service->update(['is_active' => true]),
                     'deactivate' => $service->update(['is_active' => false]),
                     'feature' => $service->update(['is_featured' => true]),
@@ -264,9 +328,16 @@ class ServiceController extends Controller
 
         $count = $services->count();
 
+        $outcome = match ($action) {
+            'delete' => 'deleted',
+            'restore' => 'restored',
+            'force-delete' => 'permanently deleted',
+            default => 'updated',
+        };
+
         return back()->with(
             'success',
-            sprintf('%d %s updated.', $count, $count === 1 ? 'service' : 'services'),
+            sprintf('%d %s %s.', $count, $count === 1 ? 'service' : 'services', $outcome),
         );
     }
 

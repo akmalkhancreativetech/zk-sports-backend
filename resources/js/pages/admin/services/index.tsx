@@ -7,6 +7,7 @@ import {
     MoreHorizontalIcon,
     PencilIcon,
     PlusIcon,
+    RotateCcwIcon,
     StarIcon,
     StarOffIcon,
     TrashIcon,
@@ -43,16 +44,69 @@ interface Props {
     filters: TableFilters;
     categories: EnumOption[];
     canDelete: boolean;
+    canRestore: boolean;
 }
 
-type BulkAction = 'activate' | 'deactivate' | 'feature' | 'unfeature' | 'delete';
+type BulkAction =
+    | 'activate'
+    | 'deactivate'
+    | 'feature'
+    | 'unfeature'
+    | 'delete'
+    | 'restore'
+    | 'force-delete';
 
-export default function ServicesIndex({ services, filters, categories, canDelete }: Props) {
+export default function ServicesIndex({
+    services,
+    filters,
+    categories,
+    canDelete,
+    canRestore,
+}: Props) {
     const [pendingDelete, setPendingDelete] = useState<ServiceListItem | null>(null);
+    /** Set only for a permanent delete, which needs its own, harsher warning. */
+    const [pendingPurge, setPendingPurge] = useState<ServiceListItem | null>(null);
     const [pendingBulkDelete, setPendingBulkDelete] = useState<{
         ids: number[];
         clearSelection: () => void;
+        permanent: boolean;
     } | null>(null);
+
+    /** In the trash view every row is deleted, so the actions flip wholesale. */
+    const viewingTrash = filters.trashed === 'only';
+
+    /**
+     * Dragging only makes sense while the list is showing the manual order
+     * itself: under a search, a filter or another sort the neighbouring row is
+     * not the neighbour in `sort_order`, so a drop would write nonsense.
+     */
+    const canReorder =
+        filters.sort === 'sort_order' &&
+        filters.direction === 'asc' &&
+        !filters.search &&
+        !filters.status &&
+        !filters.featured &&
+        !filters.category &&
+        !filters.trashed;
+
+    /**
+     * Permute the page's existing `sort_order` values among its rows, rather
+     * than renumbering from the index — that keeps every other page untouched
+     * whatever gaps the column has.
+     */
+    const persistOrder = (rows: ServiceListItem[]) => {
+        const slots = rows
+            .map((row) => row.sort_order)
+            .sort((a, b) => a - b);
+
+        router.post(
+            routes.services.reorder,
+            {
+                services: rows.map((row, index) => ({ id: row.id, sort_order: slots[index] })),
+            },
+            { preserveScroll: true, preserveState: true, only: ['services', 'filters'] },
+        );
+    };
 
     const runBulk = (action: BulkAction, ids: number[], clearSelection: () => void) => {
         router.post(
@@ -69,12 +123,17 @@ export default function ServicesIndex({ services, filters, categories, canDelete
             meta: { sortKey: 'title' },
             cell: ({ row }) => (
                 <div className="flex min-w-0 flex-col">
-                    <Link
-                        href={routes.services.edit(row.original.id)}
-                        className="truncate font-medium hover:underline"
-                    >
-                        {row.original.title}
-                    </Link>
+                    {/* A deleted service has no edit screen to link to. */}
+                    {row.original.deleted_at ? (
+                        <span className="truncate font-medium">{row.original.title}</span>
+                    ) : (
+                        <Link
+                            href={routes.services.edit(row.original.id)}
+                            className="truncate font-medium hover:underline"
+                        >
+                            {row.original.title}
+                        </Link>
+                    )}
                     <code className="truncate text-xs text-muted-foreground">
                         {row.original.slug}
                     </code>
@@ -120,7 +179,17 @@ export default function ServicesIndex({ services, filters, categories, canDelete
             meta: { sortKey: 'is_active' },
             cell: ({ row }) => (
                 <div className="flex flex-wrap gap-1">
-                    <ActiveBadge active={row.original.is_active} />
+                    {row.original.deleted_at ? (
+                        <StatusBadge tone="danger">
+                            Deleted{' '}
+                            {new Date(row.original.deleted_at).toLocaleDateString(undefined, {
+                                day: 'numeric',
+                                month: 'short',
+                            })}
+                        </StatusBadge>
+                    ) : (
+                        <ActiveBadge active={row.original.is_active} />
+                    )}
                     {row.original.is_featured && (
                         <StatusBadge tone="warning" showDot={false}>
                             <StarIcon />
@@ -148,20 +217,50 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                             }
                         />
                         <DropdownMenuContent className="w-auto min-w-40" align="end">
-                            <DropdownMenuItem
-                                render={<Link href={routes.services.edit(row.original.id)} />}
-                            >
-                                <PencilIcon />
-                                Edit
-                            </DropdownMenuItem>
-                            {canDelete && (
-                                <DropdownMenuItem
-                                    variant="destructive"
-                                    onClick={() => setPendingDelete(row.original)}
-                                >
-                                    <TrashIcon />
-                                    Delete
-                                </DropdownMenuItem>
+                            {row.original.deleted_at ? (
+                                <>
+                                    {canRestore && (
+                                        <DropdownMenuItem
+                                            onClick={() =>
+                                                router.put(
+                                                    routes.services.restore(row.original.id),
+                                                    {},
+                                                    { preserveScroll: true },
+                                                )
+                                            }
+                                        >
+                                            <RotateCcwIcon />
+                                            Restore
+                                        </DropdownMenuItem>
+                                    )}
+                                    {canDelete && (
+                                        <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() => setPendingPurge(row.original)}
+                                        >
+                                            <TrashIcon />
+                                            Delete permanently
+                                        </DropdownMenuItem>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <DropdownMenuItem
+                                        render={<Link href={routes.services.edit(row.original.id)} />}
+                                    >
+                                        <PencilIcon />
+                                        Edit
+                                    </DropdownMenuItem>
+                                    {canDelete && (
+                                        <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() => setPendingDelete(row.original)}
+                                        >
+                                            <TrashIcon />
+                                            Delete
+                                        </DropdownMenuItem>
+                                    )}
+                                </>
                             )}
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -194,8 +293,21 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                 url={routes.services.index}
                 only={['services', 'filters']}
                 searchPlaceholder="Search title or slug…"
-                emptyMessage="No services yet. Create one to get started."
+                emptyMessage={
+                    viewingTrash
+                        ? 'Nothing in the trash.'
+                        : 'No services yet. Create one to get started.'
+                }
                 selectFilters={[
+                    {
+                        key: 'trashed',
+                        label: 'Deleted',
+                        allLabel: 'Not deleted',
+                        options: [
+                            { value: 'only', label: 'Trash only' },
+                            { value: 'with', label: 'Include deleted' },
+                        ],
+                    },
                     {
                         key: 'status',
                         label: 'Status',
@@ -212,10 +324,49 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                             { value: 'no', label: 'Not featured' },
                         ],
                     },
-                    { key: 'category', label: 'Category', options: categories },
+                    {
+                        key: 'category',
+                        label: 'Category',
+                        options: categories,
+                        searchable: true,
+                    },
                 ]}
                 rowId={(row) => row.id}
-                bulkActions={(ids, clearSelection) => (
+                onReorder={persistOrder}
+                canReorder={canReorder}
+                rowLabel={(row) => row.title}
+                bulkActions={(ids, clearSelection) =>
+                    viewingTrash ? (
+                        <>
+                            {canRestore && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => runBulk('restore', ids, clearSelection)}
+                                >
+                                    <RotateCcwIcon className="size-4" />
+                                    Restore
+                                </Button>
+                            )}
+                            {canDelete && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-destructive"
+                                    onClick={() =>
+                                        setPendingBulkDelete({
+                                            ids,
+                                            clearSelection,
+                                            permanent: true,
+                                        })
+                                    }
+                                >
+                                    <TrashIcon className="size-4" />
+                                    Delete permanently
+                                </Button>
+                            )}
+                        </>
+                    ) : (
                     <>
                         <Button
                             variant="outline"
@@ -258,6 +409,7 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                                     setPendingBulkDelete({
                                         ids,
                                         clearSelection,
+                                        permanent: false,
                                     })
                                 }
                             >
@@ -266,7 +418,8 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                             </Button>
                         )}
                     </>
-                )}
+                    )
+                }
             />
 
             <AlertDialog
@@ -276,11 +429,14 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>
-                            Delete {pendingBulkDelete?.ids.length} services?
+                            {pendingBulkDelete?.permanent
+                                ? `Permanently delete ${pendingBulkDelete.ids.length} services?`
+                                : `Delete ${pendingBulkDelete?.ids.length} services?`}
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            These are soft-deleted, so existing orders keep resolving them. They
-                            disappear from the public site and this list.
+                            {pendingBulkDelete?.permanent
+                                ? 'This cannot be undone. Their galleries, options and price tiers go with them, and the image files are removed from disk.'
+                                : 'These are soft-deleted, so existing orders keep resolving them. They disappear from the public site and this list.'}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -289,7 +445,7 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                             onClick={() => {
                                 if (pendingBulkDelete) {
                                     runBulk(
-                                        'delete',
+                                        pendingBulkDelete.permanent ? 'force-delete' : 'delete',
                                         pendingBulkDelete.ids,
                                         pendingBulkDelete.clearSelection,
                                     );
@@ -297,7 +453,7 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                                 setPendingBulkDelete(null);
                             }}
                         >
-                            Delete
+                            {pendingBulkDelete?.permanent ? 'Delete permanently' : 'Delete'}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
@@ -328,6 +484,39 @@ export default function ServicesIndex({ services, filters, categories, canDelete
                             }}
                         >
                             Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog
+                open={pendingPurge !== null}
+                onOpenChange={(open) => !open && setPendingPurge(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Permanently delete “{pendingPurge?.title}”?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This cannot be undone. Its {pendingPurge?.images_count} gallery{' '}
+                            {pendingPurge?.images_count === 1 ? 'image' : 'images'}, options and
+                            price tiers go with it, and the image files are removed from disk.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                if (pendingPurge) {
+                                    router.delete(routes.services.forceDelete(pendingPurge.id), {
+                                        preserveScroll: true,
+                                    });
+                                }
+                                setPendingPurge(null);
+                            }}
+                        >
+                            Delete permanently
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
