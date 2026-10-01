@@ -84,6 +84,56 @@ test('the index ignores an absent featured flag rather than filtering on it', fu
     $this->getJson('/api/v1/services?featured=0')->assertOk()->assertJsonCount(2, 'data');
 });
 
+test('the index sorts by price with unpriced services last', function (string $sort, array $expected) {
+    Service::factory()->create(['title' => 'On Enquiry', 'price_from' => null]);
+    Service::factory()->create(['title' => 'Dear', 'price_from' => 3000]);
+    Service::factory()->create(['title' => 'Cheap', 'price_from' => 1000]);
+
+    $response = $this->getJson("/api/v1/services?sort={$sort}")->assertOk();
+
+    expect($response->json('data.*.title'))->toBe($expected);
+})->with([
+    'ascending' => ['price_asc', ['Cheap', 'Dear', 'On Enquiry']],
+    'descending' => ['price_desc', ['Dear', 'Cheap', 'On Enquiry']],
+]);
+
+test('the index sorts by name and by newest', function () {
+    Service::factory()->create(['title' => 'Bravo', 'created_at' => now()->subDay()]);
+    Service::factory()->create(['title' => 'Alpha', 'created_at' => now()->subDays(2)]);
+    Service::factory()->create(['title' => 'Charlie', 'created_at' => now()]);
+
+    expect($this->getJson('/api/v1/services?sort=name')->json('data.*.title'))
+        ->toBe(['Alpha', 'Bravo', 'Charlie']);
+
+    expect($this->getJson('/api/v1/services?sort=newest')->json('data.*.title'))
+        ->toBe(['Charlie', 'Bravo', 'Alpha']);
+});
+
+test('the index filters by price range and drops unpriced services', function (string $query, array $expected) {
+    Service::factory()->create(['title' => 'On Enquiry', 'price_from' => null]);
+    Service::factory()->create(['title' => 'Cheap', 'price_from' => 1000]);
+    Service::factory()->create(['title' => 'Mid', 'price_from' => 2000]);
+    Service::factory()->create(['title' => 'Dear', 'price_from' => 3000]);
+
+    $response = $this->getJson("/api/v1/services?sort=price_asc&{$query}")->assertOk();
+
+    expect($response->json('data.*.title'))->toBe($expected);
+})->with([
+    'both bounds, inclusive' => ['min_price=1000&max_price=2000', ['Cheap', 'Mid']],
+    'minimum only' => ['min_price=1500', ['Mid', 'Dear']],
+    'maximum only' => ['max_price=1500', ['Cheap']],
+    'non-numeric is ignored' => ['min_price=abc', ['Cheap', 'Mid', 'Dear', 'On Enquiry']],
+]);
+
+test('an unknown sort falls back to the manual order', function () {
+    Service::factory()->create(['title' => 'Second', 'sort_order' => 2]);
+    Service::factory()->create(['title' => 'First', 'sort_order' => 1]);
+
+    $response = $this->getJson('/api/v1/services?sort=bogus')->assertOk();
+
+    expect($response->json('data.*.title'))->toBe(['First', 'Second']);
+});
+
 test('a service is shown by slug with its full detail', function () {
     $service = Service::factory()->priced()->create([
         'title' => 'Custom Jersey',

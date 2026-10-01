@@ -167,6 +167,23 @@
 }
 
 /*
+ * The catalogue's loading line: a short segment sweeping along the rule under
+ * the results count while a filter, search or sort is loading.
+ */
+@theme {
+  --animate-progress: progress 1.1s ease-in-out infinite;
+
+  @keyframes progress {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(400%);
+    }
+  }
+}
+
+/*
  * The hero's snap scroller. The dots are the navigation affordance, so the
  * scrollbar is suppressed — left visible it drew a grey rail across the full
  * width of the hero.
