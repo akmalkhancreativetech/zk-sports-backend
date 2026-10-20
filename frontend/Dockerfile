@@ -38,9 +38,9 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NODE_ENV=production
 
 # Pages that fetch at build time would need the API up, which it is not during
-# `docker compose build`. Every public route is dynamic or revalidating, so this
-# build does not prerender against the API — if that changes, a build-time fetch
-# will fail loudly here rather than silently baking stale data.
+# `docker compose build`. `apiGet` calls `connection()`, so no API-backed route
+# is prerendered — a new build-time fetch that bypasses it will fail loudly
+# here rather than silently baking stale data.
 RUN npm run build
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { z } from "zod";
 
 /**
@@ -73,12 +74,18 @@ const DEFAULT_REVALIDATE = 60;
 /**
  * GET a v1 endpoint and parse it. Throws `ApiError` for a non-2xx response and
  * `ApiContractError` when the body does not match `schema`.
+ *
+ * `connection()` keeps every API-backed route out of `next build`: the API is
+ * not reachable from the Docker build, so a prerender here fails the build.
+ * The fetch below is still cached for `revalidate` seconds at request time.
  */
 export async function apiGet<T extends z.ZodTypeAny>(
   path: string,
   schema: T,
   { revalidate = DEFAULT_REVALIDATE, searchParams }: GetOptions = {},
 ): Promise<z.infer<T>> {
+  await connection();
+
   const url = new URL(`${API_V1}/${path.replace(/^\//, "")}`);
 
   for (const [key, value] of Object.entries(searchParams ?? {})) {
