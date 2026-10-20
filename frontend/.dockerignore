@@ -1,0 +1,18 @@
+# Build context for the `site` image (docs/docker-deployment-plan.md).
+
+# Rebuilt in the image
+node_modules
+.next
+out
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+
+# Repo furniture
+.git
+.idea
+.vscode
+README.md
+Dockerfile*

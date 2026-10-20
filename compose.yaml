@@ -1,0 +1,114 @@
+# The whole zk-sports stack. See docs/docker-deployment-plan.md.
+#
+# Tailscale is NOT here: it runs on the host and funnels into the two published
+# ports below. Both bind to 127.0.0.1 deliberately — Docker writes published
+# ports straight into iptables, bypassing UFW, so an unqualified "8080:80"
+# would be open to the whole LAN while `ufw status` still looked correct.
+#
+# Compose reads `.env` from this directory for the ${...} values below, and the
+# same file is handed to the containers as their environment. Copy it from
+# .env.docker.example — a development .env will NOT work, because DB_HOST has
+# to be the `db` service, not 127.0.0.1.
+
+name: zk-sports
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    # Matches config/database.php, which pins the collation.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - db_data:/var/lib/mysql
+    # No `ports`. Only the app container reaches MySQL, over the compose network.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides whatever the file says: inside the network the database is a
+      # service name, never a loopback address.
+      DB_HOST: db
+      DB_PORT: 3306
+    volumes:
+      # Uploads outlive the container. Read-write here, read-only in `web`.
+      - uploads:/var/www/html/storage/app/public
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(0);'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Substituted into the nginx template at start. The filter stops envsubst
+      # from eating nginx's own $uri / $document_root variables.
+      PUBLIC_API_ORIGIN: ${PUBLIC_API_ORIGIN}
+      NGINX_ENVSUBST_FILTER: "PUBLIC_API_ORIGIN"
+    volumes:
+      - uploads:/var/www/html/public/storage:ro
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/up >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  site:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Inlined into the client bundle at build time. Changing any of these
+        # requires `docker compose up -d --build site`, not a restart.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+        IMAGES_ALLOW_LOCAL_IP: ${IMAGES_ALLOW_LOCAL_IP}
+    restart: unless-stopped
+    environment:
+      # Server-side fetches stay on the compose network and skip Tailscale.
+      # This is the one value that differs from the bare-metal guide, where it
+      # was 127.0.0.1:8080.
+      API_URL: http://web
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  db_data:
+  uploads:

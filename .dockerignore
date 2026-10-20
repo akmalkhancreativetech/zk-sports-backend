@@ -1,0 +1,52 @@
+# Build context for the `app` and `web` images (docs/docker-deployment-plan.md).
+#
+# Everything here is either rebuilt inside the image or must never reach it.
+# Host-built artefacts are the dangerous ones: a `vendor/` resolved against the
+# host's PHP 8.2 would silently override the 8.4 install the Dockerfile does.
+
+# Rebuilt in the image
+/vendor
+/node_modules
+/public/build
+/public/hot
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+!.env.docker.example
+/auth.json
+/storage/*.key
+
+# Runtime data — the server's lives in a volume, never in the image
+/storage/app/public/*
+!/storage/app/public/.gitignore
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+/storage/pail
+/bootstrap/cache/*.php
+
+# The public site has its own build context — frontend/.dockerignore
+/frontend
+
+# Repo furniture
+/.git
+/.github
+/.ai
+/docs
+/tests
+/.idea
+/.vscode
+/.zed
+/.claude
+/.cursor
+/.codex
+*.md
+!README.md
+/.phpunit.cache
+/.phpunit.result.cache
+/phpunit.xml
+Dockerfile*
+compose*.yaml
