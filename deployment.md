@@ -171,26 +171,34 @@ The site config is in step 9, once the code is in place.
 
 ## 7. Get the code
 
-The GitHub repo is private, so give the server a read-only **deploy key**:
+The repo is cloned over HTTPS with your GitHub username. GitHub no longer accepts your account password for git, so the "password" is a **personal access token**. Make a read-only one that only covers this repo:
+
+1. On GitHub, go to **Settings**, then **Developer settings**, then **Personal access tokens**, then **Fine-grained tokens**, then **Generate new token**.
+2. Fill it in:
+   - **Name:** `zk-server`
+   - **Expiration:** your choice. When it expires, `git pull` starts failing until you create a new token.
+   - **Repository access:** *Only select repositories*, then `zk-sports-backend`
+   - **Permissions:** *Contents* set to **Read-only**. Leave everything else at *No access*.
+3. Generate it and copy the token (`github_pat_...`). GitHub only shows it once.
+
+Tell git to remember it, so `git pull` doesn't ask again on every update:
 
 ```bash
-ssh-keygen -t ed25519 -C "zk-server deploy" -f ~/.ssh/github_deploy -N ""
-cat ~/.ssh/github_deploy.pub
+git config --global credential.helper store
 ```
 
-On GitHub, open the repo's **Settings**, then **Deploy keys**, then **Add deploy key**. Paste the key and leave "Allow write access" **off**.
+Then clone. When git asks, enter your **GitHub username** and paste the **token** as the password:
 
 ```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-  IdentityFile ~/.ssh/github_deploy
-  IdentitiesOnly yes
-EOF
-
 sudo mkdir -p /var/www/zk-sports
 sudo chown akmal:www-data /var/www/zk-sports
-git clone git@github.com:akmalkhancreativetech/zk-sports-backend.git /var/www/zk-sports
+git clone https://github.com/akmalkhancreativetech/zk-sports-backend.git /var/www/zk-sports
+chmod 600 ~/.git-credentials
 ```
+
+> `credential.helper store` saves the token in plain text in `~/.git-credentials`, readable only by your user. That's why the token should be read-only and limited to this one repo: if it leaks, it can only read this code. To revoke it, delete the token on GitHub.
+>
+> When the token expires or you replace it, run `rm ~/.git-credentials`. The next `git pull` will ask for your username and the new token.
 
 Your user owns the code, and `www-data` (Nginx/PHP-FPM) only needs to write to `storage/` and `bootstrap/cache/`.
 
@@ -485,6 +493,7 @@ Copy these off the machine now and then. A backup on the same disk doesn't prote
 | "Permission denied" writing logs or uploads | Repeat the permissions block in step 8 |
 | Upload fails for large images | `upload_max_filesize` / `post_max_size` (step 2) and `client_max_body_size` (step 9) |
 | Changes to `.env` ignored | `php artisan optimize` (config is cached) |
+| `git pull` says "Authentication failed" | The token expired or was revoked. Create a new one (step 7), run `rm ~/.git-credentials`, then pull again |
 | URL not reachable at all | `tailscale funnel status`; MagicDNS and HTTPS certificates enabled in the admin console |
 
 ### Known limitation: API rate limit

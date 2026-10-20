@@ -10,6 +10,16 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL
   : null;
 
 const nextConfig: NextConfig = {
+  /*
+   * Emit a self-contained `server.js` plus only the files Next traces as
+   * reachable, so the runtime Docker image does not have to carry the whole of
+   * node_modules. See docs/docker-deployment-plan.md §3.3.
+   *
+   * Harmless outside Docker: `npm run dev` and `npm run start` are unaffected,
+   * this only adds `.next/standalone` to the build output.
+   */
+  output: "standalone",
+
   images: {
     /*
      * Next 16 refuses to optimize an image whose host resolves to a private

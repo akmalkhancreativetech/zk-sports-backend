@@ -1,0 +1,68 @@
+# Rendered by the nginx image's envsubst at container start.
+# Only ${PUBLIC_API_ORIGIN} is substituted — see the `web` service's
+# NGINX_ENVSUBST_FILTER in compose.yaml, which stops envsubst eating nginx's
+# own $variables.
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /var/www/html/public;
+    index index.php;
+
+    # Matches post_max_size in docker/app/php.ini.
+    client_max_body_size 25M;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    charset utf-8;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Uploads, served straight off the shared volume. Laravel is not involved,
+    # so give them a long cache life — the filenames are already unique.
+    location /storage/ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # Vite output is content-hashed, so it can be cached indefinitely.
+    location /build/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass app:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+
+        # Public traffic reaches this container only through Tailscale's TLS on
+        # :8443, so the original scheme and host have to be declared. Without
+        # this Laravel builds http://localhost links and redirects — which is
+        # what breaks the redirect after login, and every image URL.
+        fastcgi_param HTTPS on;
+        fastcgi_param HTTP_HOST ${PUBLIC_API_ORIGIN};
+        fastcgi_param SERVER_PORT 443;
+
+        fastcgi_read_timeout 60s;
+    }
+
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}
