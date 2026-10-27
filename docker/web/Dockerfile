@@ -11,7 +11,7 @@
 # public/storage, read-only.
 
 # Same two build stages as the app image, so the assets are identical.
-FROM node:22-alpine AS assets
+FROM node:22.23.4-alpine AS assets
 
 WORKDIR /app
 
