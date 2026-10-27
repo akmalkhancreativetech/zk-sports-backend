@@ -7,7 +7,8 @@
 # Neither toolchain survives into the final image.
 #
 # PHP is pinned to 8.4: composer.json allows ^8.3, but composer.lock is resolved
-# against 8.4 (deployment.md §2).
+# against 8.4 (deployment.md §2). The patch level is pinned too, at or above
+# 8.4.27 (CVE-2026-109618/109619), so a stale cached base image can't ship.
 
 # ---------------------------------------------------------------------------
 # Stage 1 — PHP dependencies
@@ -35,7 +36,7 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 # ---------------------------------------------------------------------------
 # Stage 2 — Admin panel assets (Inertia + React, built by Vite)
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS assets
+FROM node:22.23.4-alpine AS assets
 
 WORKDIR /app
 
@@ -52,7 +53,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 3 — Runtime
 # ---------------------------------------------------------------------------
-FROM php:8.4-fpm-alpine AS runtime
+FROM php:8.4.27-fpm-alpine AS runtime
 
 # Build-only headers, removed in the same layer so they never ship.
 RUN apk add --no-cache --virtual .build-deps \
@@ -61,6 +62,7 @@ RUN apk add --no-cache --virtual .build-deps \
         libzip-dev \
         libpng-dev \
         libjpeg-turbo-dev \
+        libwebp-dev \
         freetype-dev \
         oniguruma-dev \
     && apk add --no-cache \
@@ -68,9 +70,10 @@ RUN apk add --no-cache --virtual .build-deps \
         libzip \
         libpng \
         libjpeg-turbo \
+        libwebp \
         freetype \
         mysql-client \
-    && docker-php-ext-configure gd --with-jpeg --with-freetype \
+    && docker-php-ext-configure gd --with-jpeg --with-webp --with-freetype \
     && docker-php-ext-install -j"$(nproc)" \
         bcmath \
         exif \
